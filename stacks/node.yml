@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  web:
+    image: node:18-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm start"
+    volumes:
+      - /home/xpanel/sites/{{WORKSPACE_ID}}:/app
+    environment:
+      - NODE_ENV=production
+{{ENV_VARS}}
+    ports:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.xpanel-{{WORKSPACE_ID}}.rule=Host(`{{DOMAIN}}`)"
+        - "traefik.http.routers.xpanel-{{WORKSPACE_ID}}.entrypoints=websecure"
+        - "traefik.http.routers.xpanel-{{WORKSPACE_ID}}.tls.certresolver=letsencrypt"
+        - "traefik.http.services.xpanel-{{WORKSPACE_ID}}.loadbalancer.server.port=3000"
+    networks:
+      - xpanel-net
+
+networks:
+  xpanel-net:
+    external: true

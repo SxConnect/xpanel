@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Xpanel - Workspaces</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Xpanel</h1>
+            <div class="header-actions">
+                <span id="userEmail"></span>
+                <button onclick="logout()" class="btn btn-secondary">Sair</button>
+            </div>
+        </header>
+        
+        <main>
+            <div class="section-header">
+                <h2>Meus Workspaces</h2>
+                <button onclick="showCreateModal()" class="btn">+ Novo Workspace</button>
+            </div>
+            
+            <div id="workspacesList" class="grid"></div>
+        </main>
+    </div>
+    
+    <!-- Modal Criar Workspace -->
+    <div id="createModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="hideCreateModal()">&times;</span>
+            <h2>Novo Workspace</h2>
+            
+            <form id="createForm">
+                <div class="form-group">
+                    <label for="name">Nome do Projeto</label>
+                    <input type="text" id="name" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="repo_url">Repositório GitHub</label>
+                    <input type="url" id="repo_url" required placeholder="https://github.com/usuario/repo">
+                </div>
+                
+                <div class="form-group">
+                    <label for="branch">Branch</label>
+                    <input type="text" id="branch" value="main">
+                </div>
+                
+                <div class="form-group">
+                    <label for="template">Template</label>
+                    <select id="template" required>
+                        <option value="static-html">HTML Estático</option>
+                        <option value="node-js">Node.js</option>
+                        <option value="nextjs">Next.js</option>
+                        <option value="php">PHP</option>
+                        <option value="python">Python</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="domain">Domínio Principal</label>
+                    <input type="text" id="domain" required placeholder="meusite.com.br">
+                </div>
+                
+                <div class="form-group">
+                    <label for="env">Variáveis de Ambiente (JSON)</label>
+                    <textarea id="env" rows="3" placeholder='{"KEY": "value"}'></textarea>
+                </div>
+                
+                <h3>Banco de Dados (Opcional)</h3>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="db_type">Tipo</label>
+                        <select id="db_type">
+                            <option value="">Nenhum</option>
+                            <option value="postgres">PostgreSQL</option>
+                            <option value="mysql">MySQL</option>
+                            <option value="mongodb">MongoDB</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="db_name">Nome</label>
+                        <input type="text" id="db_name">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="db_user">Usuário</label>
+                        <input type="text" id="db_user">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="db_password">Senha</label>
+                        <input type="password" id="db_password">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="db_host">Host</label>
+                        <input type="text" id="db_host" value="localhost">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="db_port">Porta</label>
+                        <input type="number" id="db_port" value="5432">
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn">Criar Workspace</button>
+            </form>
+        </div>
+    </div>
+    
+    <script src="js/app.js"></script>
+    <script>
+        loadWorkspaces();
+    </script>
+</body>
+</html>

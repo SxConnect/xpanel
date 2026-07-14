@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-xpanel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-xpanel}
+      POSTGRES_DB: ${POSTGRES_DB:-xpanel}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - xpanel-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-xpanel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  backend:
+    build: ./backend
+    expose:
+      - "3000"
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-xpanel}:${POSTGRES_PASSWORD:-xpanel}@postgres:5432/${POSTGRES_DB:-xpanel}
+      - JWT_SECRET=${JWT_SECRET:-change-me}
+      - COOKIE_SECRET=${COOKIE_SECRET:-change-me}
+      - NODE_ENV=production
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - xpanel-net
+    volumes:
+      - /home/xpanel/sites:/home/xpanel/sites
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.xpanel.rule=Host(`${XPANEL_DOMAIN:-xpanel.localhost}`)"
+        - "traefik.http.routers.xpanel.entrypoints=websecure"
+        - "traefik.http.routers.xpanel.tls.certresolver=letsencrypt"
+        - "traefik.http.services.xpanel.loadbalancer.server.port=3000"
+
+networks:
+  xpanel-net:
+    driver: overlay
+    attachable: true
+
+volumes:
+  pgdata:

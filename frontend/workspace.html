@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Xpanel - Workspace</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Xpanel</h1>
+            <div class="header-actions">
+                <a href="workspaces.html" class="btn btn-secondary">← Voltar</a>
+                <button onclick="logout()" class="btn btn-secondary">Sair</button>
+            </div>
+        </header>
+        
+        <main>
+            <div class="workspace-header">
+                <h2 id="workspaceName"></h2>
+                <span id="workspaceStatus" class="status"></span>
+            </div>
+            
+            <div class="actions">
+                <button onclick="deploy()" class="btn">🚀 Deploy</button>
+                <button onclick="stop()" class="btn btn-warning">⏹ Parar</button>
+                <button onclick="showRollbackModal()" class="btn btn-secondary">↩ Rollback</button>
+                <button onclick="showDomainsModal()" class="btn btn-secondary">🌐 Domínios</button>
+            </div>
+            
+            <div class="info-grid">
+                <div class="info-card">
+                    <h3>Repositório</h3>
+                    <p id="repoUrl"></p>
+                </div>
+                <div class="info-card">
+                    <h3>Branch</h3>
+                    <p id="branch"></p>
+                </div>
+                <div class="info-card">
+                    <h3>Template</h3>
+                    <p id="template"></p>
+                </div>
+                <div class="info-card">
+                    <h3>Domínio</h3>
+                    <p id="domain"></p>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h3>Domínios</h3>
+                <ul id="domainsList"></ul>
+            </div>
+            
+            <div class="section">
+                <h3>Histórico de Deploys</h3>
+                <div id="deploymentsList"></div>
+            </div>
+            
+            <div class="section">
+                <h3>Logs</h3>
+                <button onclick="loadLogs()" class="btn btn-secondary">Atualizar Logs</button>
+                <pre id="logsContent" class="logs"></pre>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Modal Rollback -->
+    <div id="rollbackModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="hideRollbackModal()">&times;</span>
+            <h2>Rollback</h2>
+            <p>Selecione o commit para reverter:</p>
+            <select id="rollbackCommit"></select>
+            <button onclick="rollback()" class="btn btn-warning">Confirmar Rollback</button>
+        </div>
+    </div>
+    
+    <!-- Modal Domínios -->
+    <div id="domainsModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="hideDomainsModal()">&times;</span>
+            <h2>Gerenciar Domínios</h2>
+            
+            <div class="form-group">
+                <input type="text" id="newDomain" placeholder="novo-dominio.com.br">
+                <button onclick="addDomain()" class="btn">Adicionar</button>
+            </div>
+            
+            <ul id="modalDomainsList"></ul>
+        </div>
+    </div>
+    
+    <script src="js/app.js"></script>
+    <script>
+        const workspaceId = new URLSearchParams(window.location.search).get('id');
+        loadWorkspace(workspaceId);
+        loadDeployments(workspaceId);
+        loadLogs();
+    </script>
+</body>
+</html>
