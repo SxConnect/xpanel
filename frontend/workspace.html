@@ -27,9 +27,15 @@
                 <button onclick="stop()" class="btn btn-warning">⏹ Parar</button>
                 <button onclick="showRollbackModal()" class="btn btn-secondary">↩ Rollback</button>
                 <button onclick="showDomainsModal()" class="btn btn-secondary">🌐 Domínios</button>
+                <button onclick="backupWorkspace()" class="btn btn-secondary">📦 Backup</button>
+                <button onclick="deleteWorkspace()" class="btn btn-danger">🗑 Excluir</button>
             </div>
             
             <div class="info-grid">
+                <div class="info-card">
+                    <h3>URL de Acesso</h3>
+                    <p id="workspaceUrl"></p>
+                </div>
                 <div class="info-card">
                     <h3>Repositório</h3>
                     <p id="repoUrl"></p>

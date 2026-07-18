@@ -27,18 +27,24 @@ services:
       - "3000"
     environment:
       - DATABASE_URL=postgres://${POSTGRES_USER:-xpanel}:${POSTGRES_PASSWORD:-xpanel}@postgres:5432/${POSTGRES_DB:-xpanel}
-      - JWT_SECRET=${JWT_SECRET:-change-me}
-      - COOKIE_SECRET=${COOKIE_SECRET:-change-me}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - COOKIE_SECRET=${COOKIE_SECRET:-change-me-in-production}
       - NODE_ENV=production
       - DOCKER_HOST=unix:///var/run/docker.sock
+      - XPANEL_DOMAIN=${XPANEL_DOMAIN:-xpanel.localhost}
+      - XPANEL_SITES_DIR=/home/xpanel/sites
+      - XPANEL_HOST_SITES_DIR=${XPANEL_HOST_SITES_DIR:-/home/xpanel/sites}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@xpanel.local}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-xpanel1234}
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
     networks:
       - xpanel-net
     volumes:
       - /home/xpanel/sites:/home/xpanel/sites
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./frontend:/app/frontend
+      - ./backend/stacks:/app/stacks
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
       interval: 30s
@@ -51,8 +57,7 @@ services:
       labels:
         - "traefik.enable=true"
         - "traefik.http.routers.xpanel.rule=Host(`${XPANEL_DOMAIN:-xpanel.localhost}`)"
-        - "traefik.http.routers.xpanel.entrypoints=websecure"
-        - "traefik.http.routers.xpanel.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.xpanel.entrypoints=web"
         - "traefik.http.services.xpanel.loadbalancer.server.port=3000"
 
 networks:

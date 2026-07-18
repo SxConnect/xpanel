@@ -1,25 +1,24 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 const fastify = require('fastify')({ 
   logger: true,
-  bodyLimit: 1048576 // 1MB
+  bodyLimit: 1048576
 });
 const pool = require('./db');
 
 // Plugins
 fastify.register(require('@fastify/cors'), { 
-  origin: process.env.NODE_ENV === 'production' 
-    ? [`https://${process.env.XPANEL_DOMAIN || 'localhost'}`, true]
-    : true, 
+  origin: true, 
   credentials: true 
 });
 fastify.register(require('@fastify/jwt'), { 
-  secret: process.env.JWT_SECRET || 'CHANGE-ME-IN-PRODUCTION'
+  secret: process.env.JWT_SECRET || 'xpanel-dev-secret-change-in-production'
 });
 fastify.register(require('@fastify/cookie'), { 
-  secret: process.env.COOKIE_SECRET || 'CHANGE-ME-IN-PRODUCTION'
+  secret: process.env.COOKIE_SECRET || 'xpanel-dev-cookie-change-in-production'
 });
-fastify.register(require('@fastify/static'), { 
-  root: require('path').join(__dirname, '../../frontend') 
+fastify.register(require('@fastify/static'), {
+  root: require('path').join(__dirname, '../frontend'),
+  index: 'login.html'
 });
 
 // Middleware de autenticação
@@ -27,35 +26,35 @@ fastify.decorate('authenticate', async (request, reply) => {
   try {
     await request.jwtVerify();
   } catch (err) {
-    reply.status(401).send({ error: 'Não autorizado' });
+    return reply.status(401).send({ error: 'Não autorizado' });
+  }
+
+  // Verificar se o usuário ainda existe no banco
+  try {
+    const result = await pool.query('SELECT id FROM users WHERE id = $1', [request.user.id]);
+    if (result.rows.length === 0) {
+      return reply.status(401).send({ error: 'Usuário não encontrado' });
+    }
+  } catch {
+    return reply.status(401).send({ error: 'Não autorizado' });
   }
 });
 
-// Handler global de erros - não expor stacktrace em produção
+// Handler global de erros
 fastify.setErrorHandler((error, request, reply) => {
   fastify.log.error(error);
-  
-  const isProd = process.env.NODE_ENV === 'production';
-  
-  // JSON malformado
+
   if (error.validation) {
     return reply.status(400).send({ error: 'Dados inválidos na requisição' });
   }
 
-  // Rate limit
-  if (error.statusCode === 429) {
-    return reply.status(429).send({ error: 'Muitas requisições. Aguarde.' });
+  const statusCode = error.statusCode || 500;
+  
+  if (process.env.NODE_ENV === 'production') {
+    return reply.status(statusCode).send({ error: 'Erro interno do servidor' });
   }
 
-  const statusCode = error.statusCode || 500;
-  const message = isProd ? 'Erro interno do servidor' : error.message;
-
-  return reply.status(statusCode).send({ error: message });
-});
-
-// Handler para JSON malformado
-fastify.addContentTypeParser('application/json', { parse: 'error' }, (req, body, done) => {
-  done(new Error('JSON inválido'));
+  return reply.status(statusCode).send({ error: error.message });
 });
 
 // Rotas
@@ -128,7 +127,6 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT NOW()
       );
 
-      -- Índices para performance
       CREATE INDEX IF NOT EXISTS idx_workspaces_user_id ON workspaces(user_id);
       CREATE INDEX IF NOT EXISTS idx_workspaces_status ON workspaces(status);
       CREATE INDEX IF NOT EXISTS idx_deployments_workspace_id ON deployments(workspace_id);
@@ -136,6 +134,32 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_domains_workspace_id ON domains(workspace_id);
       CREATE INDEX IF NOT EXISTS idx_domains_domain ON domains(domain);
     `);
+
+    // Migration: adicionar coluna port se não existir
+    const colCheck = await client.query(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'workspaces' AND column_name = 'port'
+    `);
+    if (colCheck.rows.length === 0) {
+      await client.query('ALTER TABLE workspaces ADD COLUMN port INTEGER');
+      fastify.log.info('Coluna "port" adicionada à tabela workspaces');
+    }
+
+    fastify.log.info('Banco de dados inicializado com sucesso');
+
+    // Criar admin padrão se não houver usuários
+    const bcrypt = require('bcryptjs');
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@xpanel.local';
+    const adminPassword = process.env.ADMIN_PASSWORD || 'xpanel1234';
+    const adminResult = await client.query('SELECT id FROM users LIMIT 1');
+    if (adminResult.rows.length === 0) {
+      const hash = await bcrypt.hash(adminPassword, 12);
+      await client.query(
+        'INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3)',
+        [adminEmail, hash, 'admin']
+      );
+      fastify.log.info(`Admin padrão criado: ${adminEmail}`);
+    }
   } finally {
     client.release();
   }

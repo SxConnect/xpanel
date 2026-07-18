@@ -6,12 +6,11 @@ services:
     working_dir: /app
     command: sh -c "pip install -r requirements.txt && python app.py"
     volumes:
-      - /home/xpanel/sites/{{WORKSPACE_ID}}:/app
+      - {{DEPLOY_PATH}}:/app
     environment:
       - PYTHONUNBUFFERED=1
 {{ENV_VARS}}
-    ports:
-      - "5000"
+{{PORT_MAPPING}}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000"]
       interval: 30s
@@ -23,11 +22,7 @@ services:
       restart_policy:
         condition: on-failure
       labels:
-        - "traefik.enable=true"
-        - "traefik.http.routers.xpanel-{{WORKSPACE_ID}}.rule=Host(`{{DOMAIN}}`)"
-        - "traefik.http.routers.xpanel-{{WORKSPACE_ID}}.entrypoints=websecure"
-        - "traefik.http.routers.xpanel-{{WORKSPACE_ID}}.tls.certresolver=letsencrypt"
-        - "traefik.http.services.xpanel-{{WORKSPACE_ID}}.loadbalancer.server.port=5000"
+{{DEPLOY_LABELS}}
     networks:
       - xpanel-net
 

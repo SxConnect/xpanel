@@ -95,7 +95,7 @@ module.exports = async function (fastify) {
       return reply.status(400).send({ error: 'Template inválido' });
     }
 
-    await pool.query('UPDATE workspaces SET status = $1 WHERE id = $2', ['deploying', workspace.id]);
+    await pool.query('UPDATE workspaces SET status = $1 WHERE id = $2', ['cloning', workspace.id]);
 
     const deploy = await pool.query(
       'INSERT INTO deployments (workspace_id, status, branch) VALUES ($1, $2, $3) RETURNING *',
@@ -107,6 +107,7 @@ module.exports = async function (fastify) {
 
       try {
         await fs.access(path.join(repoDir, '.git'));
+        await pool.query('UPDATE workspaces SET status = $1 WHERE id = $2', ['pulling', workspace.id]);
         execSync(`git -C "${repoDir}" fetch origin && git -C "${repoDir}" checkout "${branch}" && git -C "${repoDir}" pull origin "${branch}"`, {
           stdio: 'pipe',
           timeout: 60000
@@ -131,26 +132,64 @@ module.exports = async function (fastify) {
       const templatePath = path.join(__dirname, '../../stacks', `${workspace.template}.yml`);
       const templateContent = await fs.readFile(templatePath, 'utf8');
 
-      let stackContent = templateContent
-        .replace(/\{\{WORKSPACE_ID\}\}/g, workspace.id)
-        .replace(/\{\{WORKSPACE_NAME\}\}/g, workspace.name.replace(/[^a-zA-Z0-9_-]/g, ''))
-        .replace(/\{\{DEPLOY_PATH\}\}/g, workspace.deploy_path)
-        .replace(/\{\{DOMAIN\}\}/g, workspace.domain || '')
-        .replace(/\{\{XPANEL_DOMAIN\}\}/g, process.env.XPANEL_DOMAIN || 'xpanel.localhost');
+      // Gerar labels de deploy (Traefik se domínio, porta direta se não)
+      const hostPath = process.env.XPANEL_HOST_SITES_DIR
+        ? workspace.deploy_path.replace(process.env.XPANEL_SITES_DIR || '/home/xpanel/sites', process.env.XPANEL_HOST_SITES_DIR)
+        : workspace.deploy_path;
 
-      if (workspace.env && typeof workspace.env === 'object' && Object.keys(workspace.env).length > 0) {
-        const envVars = Object.entries(workspace.env)
-          .filter(([key]) => /^[A-Z_][A-Z0-9_]*$/.test(key))
-          .map(([key, value]) => `      - ${key}=${String(value).replace(/['"]/g, '')}`)
-          .join('\n');
-        stackContent = stackContent.replace('{{ENV_VARS}}', envVars);
+      const wsId = workspace.id;
+      const stackService = `xp${wsId}`;
+
+      // Portas internas por template
+      const internalPorts = { 'static-html': 80, 'node': 3000, 'nextjs': 3000, 'php': 80, 'python': 5000 };
+      const internalPort = internalPorts[workspace.template] || 80;
+
+      let deployLabels;
+      if (workspace.domain) {
+        // Com domínio: Traefik roteia por Host
+        deployLabels = [
+          `        - "traefik.enable=true"`,
+          `        - "traefik.http.routers.${stackService}.rule=Host(\`${workspace.domain}\`)"`,
+          `        - "traefik.http.routers.${stackService}.entrypoints=web"`,
+          `        - "traefik.http.services.${stackService}.loadbalancer.server.port=${internalPort}"`,
+        ].join('\n');
       } else {
-        stackContent = stackContent.replace('{{ENV_VARS}}', '');
+        // Sem domínio: porta direta (localhost)
+        deployLabels = [
+          `        - "traefik.enable=false"`,
+          `        - "xpanel.port=${workspace.port || 8080}"`,
+        ].join('\n');
       }
+
+      let stackContent = templateContent
+        .replace(/\{\{WORKSPACE_ID\}\}/g, wsId)
+        .replace(/\{\{WORKSPACE_NAME\}\}/g, workspace.name.replace(/[^a-zA-Z0-9_-]/g, ''))
+        .replace(/\{\{DEPLOY_PATH\}\}/g, hostPath)
+        .replace(/\{\{DOMAIN\}\}/g, workspace.domain || '')
+        .replace(/\{\{PORT\}\}/g, workspace.port || 8080)
+        .replace(/\{\{XPANEL_DOMAIN\}\}/g, process.env.XPANEL_DOMAIN || 'xpanel.localhost')
+        .replace(/\{\{DEPLOY_LABELS\}\}/g, deployLabels)
+        .replace(/\{\{PORT_MAPPING\}\}/g, workspace.domain ? '' : `    ports:\n      - "${workspace.port || 8080}:${internalPort}"`);
+
+      const crypto = require('crypto');
+      const autoEnv = {
+        JWT_SECRET: crypto.randomBytes(32).toString('hex'),
+        COOKIE_SECRET: crypto.randomBytes(32).toString('hex'),
+      };
+
+      const userEnv = (workspace.env && typeof workspace.env === 'object') ? workspace.env : {};
+      const mergedEnv = { ...autoEnv, ...userEnv };
+
+      const envVars = Object.entries(mergedEnv)
+        .filter(([key]) => /^[A-Z_][A-Z0-9_]*$/.test(key))
+        .map(([key, value]) => `      - ${key}=${String(value).replace(/['"]/g, '')}`)
+        .join('\n');
+      stackContent = stackContent.replace('{{ENV_VARS}}', envVars);
 
       const stackPath = path.join(repoDir, 'docker-stack.yml');
       await fs.writeFile(stackPath, stackContent);
 
+      await pool.query('UPDATE workspaces SET status = $1 WHERE id = $2', ['deploying', workspace.id]);
       execSync(`docker stack deploy -c "${stackPath}" "${stackName}"`, {
         cwd: repoDir,
         stdio: 'pipe',
@@ -158,6 +197,7 @@ module.exports = async function (fastify) {
       });
 
       // Healthcheck pos-deploy
+      await pool.query('UPDATE workspaces SET status = $1 WHERE id = $2', ['healthcheck', workspace.id]);
       let isHealthy = false;
       for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000));
@@ -189,6 +229,8 @@ module.exports = async function (fastify) {
 
       return { success: true, commit };
     } catch (error) {
+      fastify.log.error(error, 'Deploy failed for workspace %d', workspace.id);
+
       await pool.query(
         'UPDATE deployments SET status = $1, finished_at = NOW() WHERE id = $2',
         ['failed', deploy.rows[0].id]
@@ -308,6 +350,78 @@ module.exports = async function (fastify) {
     } catch (error) {
       return reply.status(500).send({ error: 'Falha ao iniciar workspace' });
     }
+  });
+
+  // Backup do workspace
+  fastify.get('/api/workspaces/:id/backup', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    const workspace = await getOwnedWorkspace(request.params.id, request.user.id);
+    if (!workspace) {
+      return reply.status(404).send({ error: 'Workspace não encontrado' });
+    }
+
+    const repoDir = workspace.deploy_path;
+    try {
+      await fs.access(repoDir);
+    } catch {
+      return reply.status(404).send({ error: 'Diretório do deploy não encontrado' });
+    }
+
+    const slug = workspace.name.trim().toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+    const filename = `backup-${slug}-${new Date().toISOString().slice(0, 10)}.tar.gz`;
+    const tmpPath = `/tmp/${filename}`;
+
+    try {
+      execSync(`tar -czf "${tmpPath}" -C "${path.dirname(repoDir)}" "${path.basename(repoDir)}"`, {
+        stdio: 'pipe',
+        timeout: 120000
+      });
+
+      const fileBuffer = await fs.readFile(tmpPath);
+
+      reply.header('Content-Type', 'application/gzip');
+      reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+      reply.header('Content-Length', fileBuffer.length);
+
+      return fileBuffer;
+    } catch (error) {
+      fastify.log.error(error);
+      return reply.status(500).send({ error: 'Falha ao criar backup' });
+    } finally {
+      try { await fs.unlink(tmpPath); } catch {}
+    }
+  });
+
+  // Excluir workspace (parar stack, remover arquivos e registros)
+  fastify.delete('/api/workspaces/:id', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    const workspace = await getOwnedWorkspace(request.params.id, request.user.id);
+    if (!workspace) {
+      return reply.status(404).send({ error: 'Workspace não encontrado' });
+    }
+
+    const stackName = safeStackName(workspace.id);
+
+    // Parar stack Docker
+    try {
+      execSync(`docker stack rm "${stackName}"`, { stdio: 'pipe', timeout: 30000 });
+    } catch {}
+
+    // Aguardar services sumirem
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // Remover diretório de deploy
+    try {
+      await fs.rm(workspace.deploy_path, { recursive: true, force: true });
+    } catch {}
+
+    // Remover registros do banco (cascata via FK)
+    try {
+      await pool.query('DELETE FROM workspaces WHERE id = $1', [workspace.id]);
+    } catch (error) {
+      fastify.log.error(error);
+      return reply.status(500).send({ error: 'Falha ao excluir workspace do banco' });
+    }
+
+    return { success: true, message: 'Workspace excluído com sucesso' };
   });
 
   fastify.get('/api/workspaces/:id/deployments', { preHandler: [fastify.authenticate] }, async (request, reply) => {

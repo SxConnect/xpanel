@@ -6,12 +6,12 @@ services:
     working_dir: /app
     command: sh -c "npm install && npm start"
     volumes:
-      - /home/xpanel/sites/{{WORKSPACE_ID}}:/app
+      - {{DEPLOY_PATH}}:/app
     environment:
       - NODE_ENV=production
+      - PORT=3000
 {{ENV_VARS}}
-    ports:
-      - "3000"
+{{PORT_MAPPING}}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000"]
       interval: 30s
@@ -23,11 +23,7 @@ services:
       restart_policy:
         condition: on-failure
       labels:
-        - "traefik.enable=true"
-        - "traefik.http.routers.xpanel-{{WORKSPACE_ID}}.rule=Host(`{{DOMAIN}}`)"
-        - "traefik.http.routers.xpanel-{{WORKSPACE_ID}}.entrypoints=websecure"
-        - "traefik.http.routers.xpanel-{{WORKSPACE_ID}}.tls.certresolver=letsencrypt"
-        - "traefik.http.services.xpanel-{{WORKSPACE_ID}}.loadbalancer.server.port=3000"
+{{DEPLOY_LABELS}}
     networks:
       - xpanel-net
 

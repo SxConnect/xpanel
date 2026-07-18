@@ -4,9 +4,8 @@ const pool = require('../db');
 const BCRYPT_ROUNDS = 12;
 const MIN_PASSWORD_LENGTH = 8;
 const MAX_LOGIN_ATTEMPTS = 5;
-const LOCKOUT_TIME_MS = 15 * 60 * 1000; // 15 minutos
+const LOCKOUT_TIME_MS = 15 * 60 * 1000;
 
-// Cache em memória para tentativas de login (reseta com restart)
 const loginAttempts = new Map();
 
 function getLoginAttempts(email) {
@@ -48,7 +47,6 @@ module.exports = async function (fastify) {
       return reply.status(400).send({ error: 'Email e senha são obrigatórios' });
     }
 
-    // Verificar lockout
     const attempts = getLoginAttempts(email);
     if (attempts.lockedUntil) {
       const remainingMin = Math.ceil((attempts.lockedUntil - Date.now()) / 60000);
@@ -57,15 +55,21 @@ module.exports = async function (fastify) {
       });
     }
 
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-    if (result.rows.length === 0) {
-      // Resposta genérica para não revelar se email existe
-      return reply.status(401).send({ error: 'Credenciais inválidas' });
+    let user = null;
+    let valid = false;
+
+    try {
+      const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+      if (result.rows.length > 0) {
+        user = result.rows[0];
+        valid = await bcrypt.compare(password, user.password_hash);
+      }
+    } catch (dbErr) {
+      fastify.log.error(dbErr);
+      return reply.status(500).send({ error: 'Erro ao conectar com o banco de dados' });
     }
 
-    const user = result.rows[0];
-    const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) {
+    if (!user || !valid) {
       recordLoginAttempt(email);
       return reply.status(401).send({ error: 'Credenciais inválidas' });
     }
@@ -82,7 +86,7 @@ module.exports = async function (fastify) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
       path: '/',
-      maxAge: 86400 // 24h
+      maxAge: 86400
     });
 
     return { 
@@ -99,35 +103,42 @@ module.exports = async function (fastify) {
       return reply.status(400).send({ error: 'Email e senha são obrigatórios' });
     }
 
-    // Validar senha
     const passwordError = validatePassword(password);
     if (passwordError) {
       return reply.status(400).send({ error: passwordError });
     }
 
-    // Validar role
     const userRole = VALID_ROLES.includes(role) ? role : 'user';
 
-    const exists = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
-    if (exists.rows.length > 0) {
-      return reply.status(400).send({ error: 'Email já cadastrado' });
+    try {
+      const exists = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+      if (exists.rows.length > 0) {
+        return reply.status(400).send({ error: 'Email já cadastrado' });
+      }
+
+      const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+      const result = await pool.query(
+        'INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3) RETURNING id, email, role',
+        [email, hash, userRole]
+      );
+
+      return result.rows[0];
+    } catch (dbErr) {
+      fastify.log.error(dbErr);
+      return reply.status(500).send({ error: 'Erro ao criar conta' });
     }
-
-    const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    const result = await pool.query(
-      'INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3) RETURNING id, email, role',
-      [email, hash, userRole]
-    );
-
-    return result.rows[0];
   });
 
-  // Verificar sessão - NUNCA retorna password_hash
-  fastify.get('/api/auth/me', { preHandler: [fastify.authenticate] }, async (request) => {
-    const result = await pool.query(
-      'SELECT id, email, role, created_at FROM users WHERE id = $1',
-      [request.user.id]
-    );
-    return result.rows[0] || request.user;
+  // Verificar sessão
+  fastify.get('/api/auth/me', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    try {
+      const result = await pool.query(
+        'SELECT id, email, role, created_at FROM users WHERE id = $1',
+        [request.user.id]
+      );
+      if (result.rows.length) return result.rows[0];
+    } catch {}
+
+    return reply.status(404).send({ error: 'Usuário não encontrado' });
   });
 };

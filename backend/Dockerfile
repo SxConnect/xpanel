@@ -1,16 +1,16 @@
-FROM node:18-alpine
-FROM node:18-alpine
+FROM node:20-alpine
+
+RUN apk add --no-cache git docker-cli docker-cli-compose
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm install --only=production
 
 COPY . .
 
 RUN addgroup -S xpanel && adduser -S xpanel -G xpanel
-USER xpanel
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+CMD ["node", "src/app.js"]

@@ -1,0 +1,49 @@
+services:
+  backend:
+    image: xpanel-backend:local
+    env_file:
+      - backend/.env
+    environment:
+      - NODE_ENV=development
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - XPANEL_DOMAIN=xpanel.local
+      - XPANEL_SITES_DIR=/home/xpanel/sites
+      - XPANEL_HOST_SITES_DIR=/home/silvano/xpanel-sites
+    volumes:
+      - ./frontend:/app/frontend
+      - ./backend/src:/app/src
+      - /home/silvano/xpanel-stacks:/app/stacks
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/silvano/xpanel-sites:/home/xpanel/sites
+    networks:
+      - xpanel-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-xpanel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-xpanel}
+      POSTGRES_DB: ${POSTGRES_DB:-xpanel}
+    volumes:
+      - xpanel-local_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-xpanel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - xpanel-net
+volumes:
+  xpanel-local_pgdata:
+networks:
+  xpanel-net:
+    driver: bridge

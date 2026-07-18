@@ -4,12 +4,11 @@ services:
   web:
     image: php:8.2-apache
     volumes:
-      - /home/xpanel/sites/{{WORKSPACE_ID}}/public:/var/www/html
+      - {{DEPLOY_PATH}}:/var/www/html
     environment:
       - APACHE_DOCUMENT_ROOT=/var/www/html
 {{ENV_VARS}}
-    ports:
-      - "80"
+{{PORT_MAPPING}}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80"]
       interval: 30s
@@ -21,11 +20,7 @@ services:
       restart_policy:
         condition: on-failure
       labels:
-        - "traefik.enable=true"
-        - "traefik.http.routers.xpanel-{{WORKSPACE_ID}}.rule=Host(`{{DOMAIN}}`)"
-        - "traefik.http.routers.xpanel-{{WORKSPACE_ID}}.entrypoints=websecure"
-        - "traefik.http.routers.xpanel-{{WORKSPACE_ID}}.tls.certresolver=letsencrypt"
-        - "traefik.http.services.xpanel-{{WORKSPACE_ID}}.loadbalancer.server.port=80"
+{{DEPLOY_LABELS}}
     networks:
       - xpanel-net
 

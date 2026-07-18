@@ -11,6 +11,8 @@ body {
     background: #f5f5f5;
     color: #333;
     line-height: 1.6;
+    min-height: 100vh;
+    overflow-y: auto;
 }
 
 .container {
@@ -170,6 +172,9 @@ h3 { font-size: 16px; margin-bottom: 10px; color: #666; }
 .status-idle { background: #e5e7eb; color: #374151; }
 .status-active { background: #d1fae5; color: #065f46; }
 .status-deploying { background: #fef3c7; color: #92400e; }
+.status-cloning { background: #fef3c7; color: #92400e; }
+.status-pulling { background: #fef3c7; color: #92400e; }
+.status-healthcheck { background: #dbeafe; color: #1e40af; }
 .status-error { background: #fee2e2; color: #991b1b; }
 .status-stopped { background: #e5e7eb; color: #6b7280; }
 .status-running { background: #dbeafe; color: #1e40af; }
@@ -271,6 +276,8 @@ h3 { font-size: 16px; margin-bottom: 10px; color: #666; }
     border-radius: 8px;
     max-width: 500px;
     position: relative;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
 }
 
 .close {
@@ -315,5 +322,59 @@ ul li {
 }
 
 .link a:hover {
+    text-decoration: underline;
+}
+
+/* Spinner de deploy */
+.spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid #f59e0b;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.workspace-card.deploying,
+.workspace-card.cloning,
+.workspace-card.pulling,
+.workspace-card.healthcheck {
+    border-left: 4px solid #f59e0b;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.workspace-card.active {
+    border-left: 4px solid #10b981;
+}
+
+.workspace-card.error {
+    border-left: 4px solid #ef4444;
+}
+
+.workspace-card.stopped {
+    border-left: 4px solid #6b7280;
+}
+
+.workspace-url {
+    color: #2563eb;
+    font-size: 13px;
+    font-family: monospace;
+    text-decoration: none;
+    word-break: break-all;
+}
+
+.workspace-url:hover {
     text-decoration: underline;
 }

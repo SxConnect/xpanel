@@ -2,6 +2,14 @@
 
 const API_BASE = '';
 
+const STATUS_LABELS = {
+  idle: 'Pronto',
+  cloning: 'Clonando repositorio...',
+  pulling: 'Atualizando repositorio...',
+  deploying: 'Iniciando containers...',
+  healthcheck: 'Verificando saude...'
+};
+
 // Gerar token CSRF simples (muda a cada sessão)
 let csrfToken = sessionStorage.getItem('csrf_token');
 if (!csrfToken) {
@@ -24,6 +32,14 @@ function checkAuth() {
 function authHeaders() {
   return {
     'Content-Type': 'application/json',
+    'Authorization': `Bearer ${localStorage.getItem('token')}`,
+    'X-CSRF-Token': csrfToken
+  };
+}
+
+// Headers de autenticação (sem body)
+function authHeadersNoBody() {
+  return {
     'Authorization': `Bearer ${localStorage.getItem('token')}`,
     'X-CSRF-Token': csrfToken
   };
@@ -59,26 +75,48 @@ async function loadWorkspaces() {
       return;
     }
 
-    const workspaces = await response.json();
+    const workspaces = await response.json().catch(() => []);
     const container = document.getElementById('workspacesList');
 
     if (!Array.isArray(workspaces) || workspaces.length === 0) {
-      container.innerHTML = '<p class="empty">Nenhum workspace encontrado. Crie seu primeiro workspace!</p>';
+      container.innerHTML = '<p class="empty">Nenhum workspace encontrado ou backend indisponível. Crie seu primeiro workspace!</p>';
       return;
     }
 
-    container.innerHTML = workspaces.map(ws => `
-      <div class="card workspace-card" onclick="window.location.href='workspace.html?id=${ws.id}'">
-        <div class="card-header">
-          <h3>${escapeHtml(ws.name)}</h3>
-          <span class="status status-${escapeHtml(ws.status)}">${escapeHtml(ws.status)}</span>
-        </div>
-        <p class="domain">${escapeHtml(ws.domain || 'Sem domínio')}</p>
-        <p class="template">${escapeHtml(ws.template)}</p>
-      </div>
-    `).join('');
+    const isDeploying = ws => ['cloning', 'pulling', 'deploying', 'healthcheck'].includes(ws.status);
+    const spinner = ws => isDeploying(ws) ? '<span class="spinner"></span>' : '';
+    const displayStatus = ws => STATUS_LABELS[ws.status] || ws.status;
+
+    container.innerHTML = workspaces.map(ws => {
+
+      let url = ws.domain || '';
+      if (!url && ws.status === 'active' && ws.port) {
+        url = `http://127.0.0.1:${ws.port}`;
+      }
+
+      const urlHtml = url
+        ? `<a class="workspace-url" href="${escapeHtml(url)}" target="_blank" onclick="event.stopPropagation()">${escapeHtml(url)}</a>`
+        : `<p class="domain" style="color:#9ca3af">Sem URL configurada</p>`;
+
+      return `
+        <div class="card workspace-card ${escapeHtml(ws.status)}" onclick="window.location.href='workspace.html?id=${ws.id}'">
+          <div class="card-header">
+            <h3>${escapeHtml(ws.name)}</h3>
+            <span class="status status-${escapeHtml(ws.status)}">${spinner(ws)}${escapeHtml(displayStatus(ws))}</span>
+          </div>
+          ${urlHtml}
+          <p class="template">${escapeHtml(ws.template)}</p>
+        </div>`;
+    }).join('');
   } catch (error) {
+    const container = document.getElementById('workspacesList');
+    if (container) container.innerHTML = '<p class="empty">Não foi possível carregar os workspaces.</p>';
     console.error('Erro ao carregar workspaces');
+  }
+
+  // Auto-refresh se houver deploy em andamento
+  if (Array.isArray(workspaces) && workspaces.some(ws => isDeploying(ws))) {
+    setTimeout(loadWorkspaces, 5000);
   }
 }
 
@@ -149,14 +187,30 @@ async function loadWorkspace(id) {
     const ws = await response.json();
 
     document.getElementById('workspaceName').textContent = ws.name || '';
-    document.getElementById('workspaceStatus').textContent = ws.status || '';
+    document.getElementById('workspaceStatus').textContent = STATUS_LABELS[ws.status] || ws.status || '';
     document.getElementById('workspaceStatus').className = `status status-${ws.status || 'idle'}`;
     document.getElementById('repoUrl').textContent = ws.repo_url || '';
     document.getElementById('branch').textContent = ws.branch || '';
     document.getElementById('template').textContent = ws.template || '';
     document.getElementById('domain').textContent = ws.domain || '';
 
+    // URL de acesso
+    const urlEl = document.getElementById('workspaceUrl');
+    if (ws.domain) {
+      urlEl.innerHTML = `<a href="${escapeHtml(ws.domain)}" target="_blank">${escapeHtml(ws.domain)}</a>`;
+    } else if (ws.port) {
+      const url = `http://127.0.0.1:${ws.port}`;
+      urlEl.innerHTML = `<a href="${escapeHtml(url)}" target="_blank">${escapeHtml(url)}</a>`;
+    } else {
+      urlEl.textContent = 'Não disponível';
+    }
+
     loadDomains(id);
+
+    // Auto-refresh se estiver fazendo deploy
+    if (['cloning', 'pulling', 'deploying', 'healthcheck'].includes(ws.status)) {
+      setTimeout(() => loadWorkspace(id), 5000);
+    }
   } catch (error) {
     console.error('Erro ao carregar workspace');
   }
@@ -166,14 +220,20 @@ async function loadWorkspace(id) {
 async function deploy() {
   const id = new URLSearchParams(window.location.search).get('id');
 
+  const statusEl = document.getElementById('workspaceStatus');
+  if (statusEl) {
+    statusEl.innerHTML = '<span class="spinner"></span> Clonando repositorio...';
+    statusEl.className = 'status status-cloning';
+  }
+
   try {
     const response = await fetch(`${API_BASE}/api/workspaces/${id}/deploy`, {
       method: 'POST',
-      headers: authHeaders()
+      headers: authHeaders(),
+      body: '{}'
     });
 
     if (response.ok) {
-      alert('Deploy iniciado com sucesso!');
       loadWorkspace(id);
       loadDeployments(id);
     } else {
@@ -181,7 +241,7 @@ async function deploy() {
       alert(error.error || 'Erro ao fazer deploy');
     }
   } catch (error) {
-    alert('Erro de conexão');
+    alert('Erro de conexao');
   }
 }
 
@@ -194,7 +254,7 @@ async function stop() {
   try {
     const response = await fetch(`${API_BASE}/api/workspaces/${id}/stop`, {
       method: 'POST',
-      headers: authHeaders()
+      headers: authHeadersNoBody()
     });
 
     if (response.ok) {
@@ -300,13 +360,40 @@ async function loadDomains(id) {
     document.getElementById('modalDomainsList').innerHTML = domains.map(d => `
       <li>
         ${escapeHtml(d)}
-        <button onclick="removeDomain('${escapeHtml(d)}')" class="btn btn-danger btn-small">Remover</button>
+        <button type="button" class="btn btn-danger btn-small" data-domain="${escapeHtml(d)}">Remover</button>
       </li>
     `).join('');
   } catch (error) {
     console.error('Erro ao carregar domínios');
   }
 }
+
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('#modalDomainsList button[data-domain]');
+  if (!btn) return;
+
+  const domain = btn.dataset.domain;
+  if (!domain) return;
+
+  const id = new URLSearchParams(window.location.search).get('id');
+  if (!confirm(`Remover domínio ${domain}?`)) return;
+
+  try {
+    const response = await fetch(`${API_BASE}/api/workspaces/${id}/domains/${encodeURIComponent(domain)}`, {
+      method: 'DELETE',
+      headers: authHeaders()
+    });
+
+    if (response.ok) {
+      loadDomains(id);
+    } else {
+      const error = await response.json();
+      alert(error.error || 'Erro ao remover domínio');
+    }
+  } catch (error) {
+    alert('Erro de conexão');
+  }
+});
 
 // Adicionar domínio
 async function addDomain() {
@@ -350,6 +437,61 @@ async function removeDomain(domain) {
     });
 
     loadDomains(id);
+  } catch (error) {
+    alert('Erro de conexão');
+  }
+}
+
+// Backup
+async function backupWorkspace() {
+  const id = new URLSearchParams(window.location.search).get('id');
+
+  try {
+    const response = await fetch(`${API_BASE}/api/workspaces/${id}/backup`, {
+      headers: authHeaders()
+    });
+
+    if (response.ok) {
+      const blob = await response.blob();
+      const disposition = response.headers.get('Content-Disposition');
+      const filename = disposition ? disposition.split('filename=')[1]?.replace(/"/g, '') : 'backup.tar.gz';
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+    } else {
+      const error = await response.json().catch(() => ({}));
+      alert(error.error || 'Erro ao baixar backup');
+    }
+  } catch (error) {
+    alert('Erro de conexão');
+  }
+}
+
+// Excluir workspace
+async function deleteWorkspace() {
+  const id = new URLSearchParams(window.location.search).get('id');
+
+  if (!confirm('Tem certeza que deseja EXCLUIR este workspace? Esta ação não pode ser desfeita.')) return;
+  if (!confirm('Última chance: o workspace e todos os seus arquivos serão permanentemente removidos.')) return;
+
+  try {
+    const response = await fetch(`${API_BASE}/api/workspaces/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders()
+    });
+
+    if (response.ok) {
+      alert('Workspace excluído com sucesso!');
+      window.location.href = 'workspaces.html';
+    } else {
+      const error = await response.json().catch(() => ({}));
+      alert(error.error || 'Erro ao excluir workspace');
+    }
   } catch (error) {
     alert('Erro de conexão');
   }

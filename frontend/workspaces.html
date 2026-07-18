@@ -52,7 +52,7 @@
                     <label for="template">Template</label>
                     <select id="template" required>
                         <option value="static-html">HTML Estático</option>
-                        <option value="node-js">Node.js</option>
+                        <option value="node" selected>Node</option>
                         <option value="nextjs">Next.js</option>
                         <option value="php">PHP</option>
                         <option value="python">Python</option>
@@ -61,7 +61,7 @@
                 
                 <div class="form-group">
                     <label for="domain">Domínio Principal</label>
-                    <input type="text" id="domain" required placeholder="meusite.com.br">
+                    <input type="text" id="domain" placeholder="opcional; será usado um domínio automático se vazio">
                 </div>
                 
                 <div class="form-group">
